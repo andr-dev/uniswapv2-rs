@@ -10,6 +10,7 @@ use ethers::{
 use crate::{
     abi::{UniswapV2Pair, UniswapV2Router02},
     constants::UNISWAP_V2_ROUTER02_ADDR,
+    error::UniswapV2Error,
     secrets::EnvStore,
     tokens::{UniswapV2Token, ERC20},
     util::create2,
@@ -24,22 +25,27 @@ pub struct UniswapV2Client {
 }
 
 impl<'a> UniswapV2Client {
-    pub async fn new(envstore: EnvStore) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(envstore: EnvStore) -> Result<Self, UniswapV2Error> {
         let provider = Provider::new(
             Ws::connect(format!(
                 "{}{}",
                 envstore.get_ws_url(),
                 envstore.get_api_key()
             ))
-            .await?,
+            .await
+            .map_err(|e| UniswapV2Error::ClientError(e))?,
         );
 
-        let chain_id = provider.get_chainid().await?;
+        let chain_id = provider
+            .get_chainid()
+            .await
+            .map_err(|e| UniswapV2Error::ProviderError(e))?;
 
-        let wallet = envstore
-            .get_eth_private_key()
-            .parse::<LocalWallet>()?
-            .with_chain_id(chain_id.as_u64());
+        let wallet = LocalWallet::from(
+            SigningKey::from_bytes(envstore.get_eth_private_key())
+                .map_err(|e| UniswapV2Error::SigningError(e))?,
+        )
+        .with_chain_id(chain_id.as_u64());
 
         let provider = Arc::new(SignerMiddleware::new(provider, wallet));
 
